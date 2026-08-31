@@ -1,0 +1,240 @@
+/* ============================================================
+   PartFinder Mobile — 基础层
+
+   内容：reset / 排版 / 应用骨架 / 双栏断点 / 动效护栏 / 间距工具类
+   不含任何组件外观（见 components.css）与页面专属样式（见 views.css）。
+
+   断点含义（折叠屏适配）：
+     < 600dp   单栏（Fold3 外屏约 331dp，极窄长）
+     600-839   双栏（Fold3 展开竖屏约 756dp）
+     >= 840    双栏宽屏（Fold3 展开横屏约 944dp）
+   ============================================================ */
+
+/* ---------- reset ---------- */
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+/* CRT 扫描线底纹：机器屏幕没关过机的证据。固定层极低强度，
+   pointer-events 放行所有点击；reduced-motion 与本层无关（纯静态）。 */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 250;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg,
+    rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+}
+
+body {
+  /* 蓝图网格画布（签名层底纹）：两层 1px 网格线叠在底色上，强度由 --grid-line
+     压到"隐约可见"；卡片是实心表面，网格只在留白处透气。body 不滚动，纯静态绘制零成本。 */
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 100% 26px,
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 26px 100%,
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-15);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+input, textarea { font: inherit; color: inherit; }
+ul { list-style: none; }
+
+/* 标识性编号统一等宽 + 表格数字，跨行对齐防误读 */
+.mono, .card-no, .hero-code, .rival-model, .kv .v .mono {
+  font-family: var(--mono);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 无障碍：键盘/外接鼠标聚焦可见 ---------- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+button, [role="button"] { -webkit-tap-highlight-color: transparent; }
+.nav button:focus-visible { outline-offset: -3px; }
+
+/* 文本选区与输入插入符走品牌色 */
+::selection { background: var(--accent-soft); color: var(--text); }
+.field input, .fb-text, .searchbox input { caret-color: var(--accent); }
+
+/* ---------- 应用骨架 ---------- */
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+}
+
+.workspace {
+  flex: 1; min-height: 0;
+  display: flex; align-items: stretch;
+  overflow: hidden;
+  /* 窄屏打开详情时的景深后退：主界面微缩+变暗，把"推入另一层"的空间感做足。
+     只动 transform/opacity，走合成器；由 JS 开合 sheet 时挂 body.sheet-open。 */
+  transition: transform var(--dur-4) var(--ease-emph), opacity var(--dur-4) var(--ease-out);
+}
+body.sheet-open .workspace { transform: scale(0.972); opacity: .55; }
+
+/* 左栏：顶栏 + 列表。窄屏纵向堆叠（视觉同旧版）；宽屏定宽成列 */
+.list-col {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+.pane {
+  min-width: 0; min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.pane::-webkit-scrollbar { width: 0; }
+
+.pane-list { flex: 1; min-height: 0; padding: 12px var(--pad-x) calc(var(--nav-h) + env(safe-area-inset-bottom) + 24px); }
+/* 显隐只由断点决定，必须压过 components.css 的 .empty（JS 给空态详情栏也挂了
+   empty 类，其 display:flex 与本条同优先级、加载在后会反盖——窄屏详情栏一旦
+   可见就会把列表挤成一条竖排细条，真机手机宽度下必现）。 */
+.pane.pane-detail { display: none; }
+
+/* 展开态：左列表 + 右详情双栏 */
+@media (min-width: 600px) {
+  /* 宽屏：搜索/筛选整体收进左栏，右侧详情从屏幕顶端通铺（已知型号查料号场景） */
+  .list-col {
+    flex: 0 0 clamp(300px, 40%, 400px);
+    border-right: 1px solid var(--border);
+  }
+  /* 两栏底部都要避开悬浮胶囊导航（实高 62px + 底部悬浮 10px + inset），
+     滚动到底时内容与胶囊之间保持 26px 呼吸位 */
+  .pane-list {
+    flex: 1; min-height: 0;
+    padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);
+  }
+  .pane.pane-detail {
+    display: block; flex: 1;
+    padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);
+  }
+  .pane.pane-detail.empty { display: grid; place-items: center; }
+
+  /* ---- 单栏画布模式（大屏审计 P0-1）----
+     竞品/客户/收藏是"非查料"页签：详情栏空置时收起，列表栏展宽为画布，
+     内容用 --measure-wide 定宽（页面级样式在 views.css）。
+     靠 body[data-tab]（app.js switchTab 挂载）驱动；选中型号后详情栏照常出现。
+     :has 不可用的老 WebView 优雅退化为旧行为（列表定宽 + 空栏隐藏）。 */
+  body[data-tab="rival"] .pane.pane-detail.empty,
+  body[data-tab="customers"] .pane.pane-detail.empty,
+  body[data-tab="saved"] .pane.pane-detail.empty { display: none; }
+  body[data-tab="rival"] .list-col:has(+ .pane.pane-detail.empty),
+  body[data-tab="customers"] .list-col:has(+ .pane.pane-detail.empty),
+  body[data-tab="saved"] .list-col:has(+ .pane.pane-detail.empty) {
+    flex: 1 1 auto;
+    border-right: 0;
+  }
+  /* 画布模式下左栏不再需要为不存在的右栏让位 */
+  body[data-tab="rival"] .pane-list,
+  body[data-tab="customers"] .pane-list,
+  body[data-tab="saved"] .pane-list {
+    padding-left: clamp(var(--pad-x), 4vw, 40px);
+    padding-right: clamp(var(--pad-x), 4vw, 40px);
+  }
+}
+
+/* ---- 桌面指针环境（大屏审计 P1-1）----
+   触屏维持零宽度滚动条（滚动位置由位移反馈承担）；
+   鼠标用户需要常驻的位置指示，给 8px 细滚动条（中性灰，hover 提亮一档）。 */
+@media (pointer: fine) {
+  .pane { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+  .pane::-webkit-scrollbar { width: 8px; height: 8px; }
+  .pane::-webkit-scrollbar-track { background: transparent; }
+  .pane::-webkit-scrollbar-thumb {
+    background: var(--surface-3); border-radius: var(--r-full);
+    border: 2px solid transparent; background-clip: padding-box;
+  }
+  .pane::-webkit-scrollbar-thumb:hover { background-color: var(--text-4); }
+}
+
+@media (min-width: 840px) {
+  .list-col { flex: 0 0 clamp(340px, 36%, 440px); }
+}
+
+/* 折叠态：详情为覆盖全屏的独立层。侧滑入带一点景深缩放，像从主界面"推入"；
+   蓝图网格画布延伸进详情层，与主界面同一张绘图板 */
+.sheet {
+  position: fixed; inset: 0; z-index: 60;
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 100% 26px,
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 26px 100%,
+    var(--bg);
+  display: flex; flex-direction: column;
+  animation: sheetIn var(--dur-4) var(--ease-emph);
+}
+@keyframes sheetIn {
+  from { transform: translateX(16%) scale(0.985); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* ---------- 动效编排 ---------- */
+
+/* Tab 切换时的列表入场动效：仅切换页签触发（由 JS 加 anim 类），
+   输入触发的连续重渲染不加，避免逐键闪烁。弹簧曲线带轻微回弹+微缩放，
+   让列表"落位"而不是"平移到位"。 */
+.pane-list.anim > * { animation: rise var(--dur-4) var(--ease-spring) both; }
+.pane-list.anim > *:nth-child(1) { animation-delay: 0ms; }
+.pane-list.anim > *:nth-child(2) { animation-delay: 24ms; }
+.pane-list.anim > *:nth-child(3) { animation-delay: 48ms; }
+.pane-list.anim > *:nth-child(4) { animation-delay: 72ms; }
+.pane-list.anim > *:nth-child(5) { animation-delay: 96ms; }
+.pane-list.anim > *:nth-child(6) { animation-delay: 120ms; }
+.pane-list.anim > *:nth-child(7) { animation-delay: 132ms; }
+.pane-list.anim > *:nth-child(n + 8) { animation-delay: 140ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.986); } to { opacity: 1; transform: none; } }
+
+/* 首屏入场编排：启动屏淡出后主区上浮接力（P3-2） */
+body.pf-ready #app { animation: appIn var(--dur-3) var(--ease-out) both; }
+@keyframes appIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* ---------- 减少动态效果：系统级尊重 ---------- */
+
+/* View Transitions 整页转场：沿用令牌时长/曲线，取代浏览器默认淡入 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-3);
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-old(root) { animation-name: vtOut; }
+::view-transition-new(root) { animation-name: vtIn; }
+@keyframes vtOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-6px); } }
+@keyframes vtIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   工具类 —— 只做两件事：撑满剩余空间、4pt 网格外边距。
+   组件外观一律走语义类，不允许在 JS 里写 style=""。
+   ============================================================ */
+
+.fill-col { flex: 1; min-width: 0; }
+.pane-fill { flex: 1; }
+
+.mt-1 { margin-top: var(--sp-1); }
+.mt-2 { margin-top: var(--sp-2); }
+.mt-3 { margin-top: var(--sp-3); }
+.mt-4 { margin-top: var(--sp-4); }
+.mb-2 { margin-bottom: var(--sp-2); }
+.mb-3 { margin-bottom: var(--sp-3); }

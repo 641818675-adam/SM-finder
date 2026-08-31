@@ -1,0 +1,456 @@
+/* ============================================================
+   PartFinder Mobile — 视图层
+
+   页面专属样式，按页签分区：选型 / 竞品 / 客户 / 详情。
+   （搜索结果页完全由 components.css 的卡片 + 计数条构成，无需专属规则。）
+   ============================================================ */
+
+/* 长列表虚拟化：视口外卡片跳过布局/绘制（与 components.css 的 .card 同策） */
+.cat-card, .series-card, .rival-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 84px;
+}
+
+/* ============================================================
+   选型 —— 三级钻取（类别 → 系列 → 型号）
+   ============================================================ */
+
+/* 第 1 层：类别入口卡 */
+.cat-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 480px) and (max-width: 599px) { .cat-grid { grid-template-columns: 1fr 1fr; } }
+.cat-card {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto;
+  column-gap: 12px; align-items: center; text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-m);
+  box-shadow: var(--e-1);
+  padding: 15px 16px 16px;
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-2), border-color var(--dur-1);
+}
+.cat-card:active { transform: scale(0.98); box-shadow: var(--e-1); }
+@media (hover: hover) {
+  .cat-card:hover { box-shadow: var(--e-hover); border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); }
+}
+/* 编辑感序号（01 / 02） */
+.cat-idx {
+  position: absolute; top: 12px; right: 14px;
+  font-size: var(--fs-11); font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--text-4);
+}
+.cat-icon {
+  grid-row: 1 / span 2;
+  width: 48px; height: 48px; border-radius: 14px;
+  display: grid; place-items: center;
+  background: linear-gradient(150deg, var(--accent-soft), var(--accent-softer));
+  color: var(--accent);
+  border: 1px solid var(--accent-soft);
+  box-shadow: inset 0 1px 0 var(--edge-hi);
+}
+.cat-label { font-size: var(--fs-17); font-weight: 700; letter-spacing: -0.2px; }
+.cat-count { font-size: var(--fs-12); color: var(--text-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.cat-preview {
+  grid-column: 1 / -1;
+  font-size: var(--fs-12); color: var(--text-3);
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cat-tags { grid-column: 2; display: flex; gap: 5px; justify-content: flex-end; }
+.cat-tags i {
+  font-style: normal; font-size: var(--fs-11); font-weight: 600;
+  color: var(--text-2); background: var(--surface-2);
+  padding: 2px 8px; border-radius: var(--r-full);
+}
+
+/* 第 2 层：原型/中性 切换 + 系列卡 */
+.cfg-quality { margin: 2px 0 10px; }
+.series-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 380px) { .series-grid { grid-template-columns: 1fr 1fr; } }
+.series-card {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-m);
+  box-shadow: var(--e-1);
+  padding: 13px 14px; min-height: 52px;
+  transition: transform var(--dur-1) var(--ease-out), border-color var(--dur-1), box-shadow var(--dur-2);
+}
+.series-card:active { transform: scale(0.97); border-color: var(--accent); }
+@media (hover: hover) {
+  .series-card:hover { box-shadow: var(--e-hover); border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); }
+}
+.series-card .s-name {
+  flex: 1; min-width: 0;
+  font-size: var(--fs-14); font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.series-card .s-count { flex: none; font-size: var(--fs-11); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.series-card .chev { flex: none; color: var(--text-4); font-size: var(--fs-16); }
+
+/* 面包屑（选型顶栏） */
+.crumb {
+  font-size: var(--fs-15); font-weight: 700; letter-spacing: -0.2px;
+  color: var(--text-3);
+  padding: 0;
+  transition: color var(--dur-1);
+}
+.crumb:active { color: var(--accent); }
+@media (hover: hover) { .crumb:hover { color: var(--accent); } }
+.crumb-sep { color: var(--text-4); }
+.crumb-cur { font-size: var(--fs-15); font-weight: 700; letter-spacing: -0.2px; }
+
+/* ============================================================
+   大屏画布模式（2026-08-31 审计 P0-1 / P1-2 / P1-3）
+   竞品/客户/收藏三个"非查料"页签在宽屏由 body[data-tab] 驱动：
+   空详情栏收起（base.css）→ 列表栏展宽为画布，内容限宽居中；
+   ≥900px 卡片序列排自适应两列，说明性/控制性区块通栏。
+   窄屏（<600px）完全不受影响。
+   ============================================================ */
+@media (min-width: 600px) {
+  body[data-tab="rival"] .pane-list > *,
+  body[data-tab="customers"] .pane-list > *,
+  body[data-tab="saved"] .pane-list > * {
+    max-width: var(--measure-wide);
+    margin-left: auto; margin-right: auto;
+  }
+  /* 顶栏内容与画布同宽，搜索框不横贯超宽屏 */
+  body[data-tab="rival"] .topbar > *,
+  body[data-tab="customers"] .topbar > *,
+  body[data-tab="saved"] .topbar > * {
+    max-width: var(--measure-wide);
+    margin-left: auto; margin-right: auto; width: 100%;
+  }
+}
+
+@media (min-width: 900px) {
+  body[data-tab="rival"] .pane-list,
+  body[data-tab="customers"] .pane-list,
+  body[data-tab="saved"] .pane-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+    gap: 9px clamp(var(--pad-x), 2vw, 18px);
+  }
+  /* 说明性 / 控制性区块：通栏 */
+  body[data-tab="rival"] .pane-list > .result-meta,
+  body[data-tab="rival"] .pane-list > .result-hint,
+  body[data-tab="rival"] .pane-list > .seg,
+  body[data-tab="rival"] .pane-list > .more,
+  body[data-tab="rival"] .pane-list > .sec-head,
+  body[data-tab="rival"] .pane-list > .empty,
+  body[data-tab="rival"] .pane-list > .searchbox,
+  body[data-tab="rival"] .pane-list > .group-title,
+  body[data-tab="customers"] .pane-list > .section,
+  body[data-tab="customers"] .pane-list > .sel-cust,
+  body[data-tab="customers"] .pane-list > .io-row,
+  body[data-tab="customers"] .pane-list > .sec-head,
+  body[data-tab="customers"] .pane-list > .empty,
+  body[data-tab="saved"] .pane-list > .sec-head,
+  body[data-tab="saved"] .pane-list > .result-hint,
+  body[data-tab="saved"] .pane-list > .empty,
+  body[data-tab="saved"] .pane-list > .more {
+    grid-column: 1 / -1;
+  }
+  /* 网格接管纵向节奏，卡片自带外边距清零防双重间隔 */
+  body[data-tab="rival"] .pane-list > .rival-card,
+  body[data-tab="customers"] .pane-list > .card,
+  body[data-tab="saved"] .pane-list > .card { margin-bottom: 0; }
+  /* 客户表单定宽居中：表单不是内容流，不该横贯画布 */
+  body[data-tab="customers"] .pane-list > .section.form-card {
+    max-width: 640px;
+    margin-left: auto; margin-right: auto;
+  }
+}
+
+/* ============================================================
+   竞品 —— 对标 / 品牌 / 话术 / 行业
+   ============================================================ */
+
+.rival-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-m);
+  padding: 13px 14px; margin-bottom: 9px; box-shadow: var(--e-1);
+}
+.rival-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.rival-brand {
+  font-size: var(--fs-13); font-weight: 700;
+  padding: 3px 10px; border-radius: var(--r-full);
+  background: var(--accent-softer); color: var(--accent);
+  border: 1px solid var(--accent-soft);
+}
+.rival-model {
+  font-size: var(--fs-15); font-weight: 600; flex: 1; min-width: 0;
+  word-break: break-all;
+}
+.rival-name { font-family: inherit; font-size: var(--fs-16); }
+.lv {
+  flex: none; font-size: var(--fs-11); font-weight: 700;
+  padding: 3px 9px; border-radius: var(--r-full); white-space: nowrap;
+}
+.lv.precise { color: var(--st-active); background: var(--st-active-bg); }
+.lv.peer { color: var(--st-pending); background: var(--st-pending-bg); }
+.lv.reference { color: var(--st-retired); background: var(--st-retired-bg); }
+
+.rival-meta { font-size: var(--fs-13); color: var(--text-2); }
+.rival-meta .arrow { color: var(--accent); font-weight: 700; margin: 0 5px; }
+.rival-note { font-size: var(--fs-12); color: var(--text-3); margin-top: 4px; }
+
+/* 品牌钻取：面包屑 + 可点品牌/机型 */
+.rival-crumb { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; }
+.rival-crumb .crumb { display: inline-flex; align-items: center; gap: 4px; }
+.rival-crumb .crumb svg { width: 15px; height: 15px; }
+button.rival-brand, .rival-brand.link { cursor: pointer; font-family: inherit; }
+.rival-brand.link:active, button.rival-brand:active { color: var(--accent-strong); }
+[data-open-brand], [data-open-rmodel] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+[data-open-brand]:active, [data-open-rmodel]:active { border-color: var(--accent-soft); transform: scale(0.995); }
+
+/* 画像 / 行业洞察的「标签-值」网格 */
+.profile-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
+@media (min-width: 600px) { .profile-grid { grid-template-columns: 1fr 1fr; } }
+.profile-item { background: var(--surface-2); border-radius: var(--r-s); padding: 9px 11px; }
+.profile-item .pk { font-size: var(--fs-11); color: var(--text-3); margin-bottom: 2px; }
+.profile-item .pv { font-size: var(--fs-13); line-height: 1.45; }
+
+/* 参考话术引用块 */
+.quote {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-softer);
+  padding: 10px 12px; border-radius: 0 var(--r-s) var(--r-s) 0;
+  font-size: var(--fs-13); line-height: 1.6; margin-top: 8px;
+  user-select: text; -webkit-user-select: text;
+}
+.quote-label {
+  font-size: var(--fs-11); font-weight: 700; color: var(--accent);
+  letter-spacing: .3px; margin-bottom: 4px;
+}
+
+/* ============================================================
+   客户管理
+   ============================================================ */
+
+.form-card .form-body { padding: 4px 15px 15px; }
+
+/* 选中客户指示条：点击可取消 */
+.sel-cust {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; margin-bottom: 10px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  border-radius: var(--r-s);
+  color: var(--accent);
+  font-size: var(--fs-13); font-weight: 600;
+  animation: rise var(--dur-3) var(--ease-out) both;
+}
+.sel-cust .sel-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.sel-cust .sel-x {
+  margin-left: auto; font-size: var(--fs-11); font-weight: 500; opacity: .72;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding-left: 10px;
+}
+
+.cust-card { display: block; }
+.cust-card .card-head { align-items: center; }
+.cust-avatar {
+  flex: none; width: 40px; height: 40px; border-radius: 13px;
+  display: grid; place-items: center;
+  background: linear-gradient(150deg, var(--accent-soft), var(--accent-softer));
+  color: var(--accent);
+  font-size: var(--fs-16); font-weight: 700;
+  border: 1px solid var(--accent-soft);
+  box-shadow: inset 0 1px 0 var(--edge-hi);
+}
+.cust-info { flex: 1; min-width: 0; }
+.cust-addr {
+  display: flex; align-items: center; gap: 5px;
+  font-size: var(--fs-13); color: var(--text-2); margin-top: 3px;
+  overflow: hidden;
+}
+.cust-addr svg { flex: none; }
+.cust-addr.none { color: var(--text-4); }
+.cust-addr > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cust-time { font-size: var(--fs-12); color: var(--text-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.cust-actions { flex: none; display: flex; flex-direction: column; gap: 5px; }
+
+.io-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.io-row .btn { flex: 1; height: 40px; font-size: var(--fs-13); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--e-1); }
+@media (hover: hover) {
+  .io-row .btn:hover { background: var(--surface-hover); }
+}
+
+/* 极窄屏（Fold3 外屏 331dp）：操作按钮换行为横向整行，把信息区还给地址（R1-02） */
+@media (max-width: 359px) {
+  .cust-card .card-head { flex-wrap: wrap; }
+  .cust-info { flex: 1 1 calc(100% - 54px); }
+  .cust-actions { flex: 1 1 100%; flex-direction: row; }
+  .cust-actions .mini-btn { flex: 1; min-width: 0; }
+}
+
+/* ============================================================
+   型号详情
+   ============================================================ */
+
+.detail-bar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  padding: calc(max(env(safe-area-inset-top), var(--topbar-pad-top)) + 8px) 12px 8px;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+.detail-bar .t { font-size: var(--fs-15); font-weight: 600; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.back { display: none; }
+@media (max-width: 599px) {
+  .back { display: grid; }
+}
+
+.detail-body { padding: 14px; }
+/* 大屏阅读度量（审计 P0-2）：详情内容限宽，超宽部分留给网格画布呼吸，
+   行长压回 ~70 全角字符内；kv 行/复制按钮不再横贯 1400px */
+@media (min-width: 600px) {
+  .detail-body { max-width: var(--measure); }
+}
+.detail-hero {
+  position: relative;
+  /* 传感器扫描线纹理（--trace）+ 对焦高光 + 顶缘受光边，签名层质感 */
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, var(--trace) 3px 4px),
+    radial-gradient(120% 90% at 100% 0%, var(--accent-softer), transparent 55%),
+    var(--surface);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-l);
+  padding: 18px; box-shadow: inset 0 1px 0 var(--edge-hi), var(--e-2);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+/* 英雄卡上的取景框角标收进框内（对焦框语言）：卡片有 overflow:hidden 裁剪，
+   外置角标会被剪掉，7px 内缩恰好框住内容区左上/右下 */
+.detail-hero.vf::before { top: 7px; left: 7px; }
+.detail-hero.vf::after { bottom: 7px; right: 7px; }
+/* 开卡扫描光束：一道柔光从左掠过英雄卡，一次性（forwards 停在画外） */
+.hero-scan {
+  position: absolute; top: 0; bottom: 0; left: 0; width: 36%;
+  background: linear-gradient(105deg, transparent, var(--accent-soft) 55%, transparent);
+  transform: translateX(-130%);
+  animation: heroScan 820ms var(--ease-out) 140ms forwards;
+  pointer-events: none;
+}
+@keyframes heroScan { to { transform: translateX(390%); } }
+.hero-top { display: flex; align-items: flex-start; gap: 10px; }
+.hero-code {
+  font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.4px;
+  word-break: break-word; line-height: 1.25;
+  position: relative; padding-bottom: 8px;
+}
+/* 料号下的短笔画：与底部导航刻度线同一语言；详情出现时从左画入 */
+.hero-code::after {
+  content: ""; position: absolute; left: 1px; bottom: 0;
+  width: 36px; height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+.pane-detail .hero-code::after, .sheet .hero-code::after {
+  transform-origin: left center;
+  animation: underlineIn .55s var(--ease-out) .18s both;
+}
+@keyframes underlineIn { from { transform: scaleX(0); } }
+
+/* 对焦收拢只发生在详情呈现层与带入场动效的列表（类别卡），静态列表不动 */
+.pane-detail .vf::before, .sheet .vf::before, .pane-list.anim .vf::before {
+  animation: vfInTL .5s var(--ease-spring) .12s both;
+}
+.pane-detail .vf::after, .sheet .vf::after, .pane-list.anim .vf::after {
+  animation: vfInBR .5s var(--ease-spring) .12s both;
+}
+
+/* 可售状态点的呼吸：只在英雄卡上（每屏一个），列表徽章保持静止 */
+.detail-hero .badge::before { animation: dotBreath 2.8s var(--ease-out) infinite; }
+@keyframes dotBreath {
+  0%, 100% { opacity: .85; transform: scale(1); }
+  50% { opacity: .4; transform: scale(.78); }
+}
+.hero-name { font-size: var(--fs-13); color: var(--text-2); margin-top: 5px; line-height: 1.5; }
+
+.badge-row { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* 报价客户胶囊：详情页里"复制整包将带上该客户"的可见状态（R2-02） */
+.badge-cust {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-11); font-weight: 600;
+  padding: 3px 10px; border-radius: var(--r-full);
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.badge-cust svg { flex: none; width: 13px; height: 13px; }
+
+.copy-row { display: flex; gap: 8px; margin-top: 16px; }
+
+/* ---- 首屏料号速览（需求1）---- */
+.kit-glance {
+  margin-top: 12px;
+  border-left: 2px solid var(--accent);
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, var(--trace) 3px 4px),
+    var(--accent-softer);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--r-s);
+  padding: 3px 10px;
+  overflow: hidden;
+}
+.kit-glance.standalone { margin: 0 0 12px; }
+.glance-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 0;
+}
+.glance-row + .glance-row { border-top: 1px dashed var(--accent-soft); }
+.glance-row .g-label { flex: none; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+/* 点线引导：规格表的手工质感 */
+.glance-row .g-lead {
+  flex: 1; min-width: 12px; height: 1px;
+  border-bottom: 1px dotted var(--border);
+  margin: 0 4px; opacity: .9;
+}
+.glance-row .g-code {
+  flex: none; max-width: 60%;
+  font-size: var(--fs-13); font-weight: 700; color: var(--accent);
+  letter-spacing: -0.2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.glance-row .mini-copy { width: 28px; height: 28px; background: var(--surface); }
+
+.kit-actions { padding: 10px 15px 15px; }
+
+/* 套包规则覆盖度告警 */
+.contract-warning {
+  margin: 0 15px 12px; padding: 11px 13px; border-radius: var(--r-m);
+  background: var(--st-phasing-bg); color: var(--st-phasing);
+  font-size: var(--fs-13); line-height: 1.55;
+  border: 1px solid color-mix(in srgb, var(--st-phasing) 22%, transparent);
+}
+.contract-warning strong { color: var(--st-phasing); font-weight: 700; }
+
+/* 同款其他长度：与真配件做视觉区分，弱化但仍可查 */
+.alternates { opacity: .8; }
+.alternates .sec-head { color: var(--text-3); }
+.alt-note {
+  padding: 0 15px 9px;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* 详细规格参数折叠区（默认收起，下移至页尾） */
+.specs-fold summary.sec-head {
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 15px;
+  list-style: none;
+  user-select: none; -webkit-user-select: none;
+}
+.specs-fold summary.sec-head::-webkit-details-marker { display: none; }
+.specs-fold .fold-arrow { color: var(--text-3); transition: transform var(--dur-2) var(--ease-out); }
+.specs-fold[open] .fold-arrow { transform: rotate(180deg); }
+.specs-fold[open] summary.sec-head { padding-bottom: 4px; }

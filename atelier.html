@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>VISION.OS 视觉机器 — PartFinder 工业读码 · 未来版</title>
+<meta name="color-scheme" content="dark">
+<!-- ============================================================
+     设计主张（manifesto）
+     《VISION.OS》—— 页面即一台工业视觉机器。
+     你在页面上检索型号的动作，和读码器在产线上锁定条码的动作，
+     是同一个动作：扫描（红激光掠过）→ 锁定（检测框合拢）→ 解码（青色确认）→ 输出（料号）。
+     近黑是暗场，荧光青是解码成功的颜色，激光红只属于扫描线。
+     所有光都对应一个真实动作；所有数字都来自真实台账。
+     ============================================================ -->
+<style>
+/* ---------------- 暗场色板 ----------------
+   暗场 #04070a / 面板 #0a1118 / 解码青 #2af5cf / 激光红 #ff4d3d /
+   琥珀(待上市) #ffb02e / 金属字 #e6f4f0 / 暗灰青 #6f8b98 */
+:root{
+  --bg:#04070a;
+  --panel:#0a1118;
+  --panel-2:#0d151d;
+  --cy:#2af5cf;
+  --cy-dim:rgba(42,245,207,.14);
+  --cy-line:rgba(42,245,207,.32);
+  --red:#ff4d3d;
+  --amber:#ffb02e;
+  --ink:#e6f4f0;
+  --ink-2:#9fb8bd;
+  --ink-3:#6f8b98;
+  --hair:rgba(140,220,235,.14);
+  --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Consolas,"Courier New",monospace;
+  --sans:"PingFang SC","HarmonyOS Sans SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:15px;line-height:1.75;
+  overflow-x:hidden;
+}
+/* 扫描线纹理（CRT 暗场）+ 暗角：机器屏幕的底噪 */
+body::before{
+  content:"";position:fixed;inset:0;z-index:118;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:119;pointer-events:none;
+  background:radial-gradient(120% 90% at 50% 40%,transparent 55%,rgba(0,0,0,.5) 100%);
+}
+#stars{position:fixed;inset:0;z-index:0;pointer-events:none}
+::selection{background:var(--cy);color:#021512}
+:focus-visible{outline:1.5px solid var(--cy);outline-offset:3px}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* ---------------- HUD 骨架通用 ---------------- */
+.sheet{max-width:1180px;margin:0 auto;padding:0 7vw;position:relative;z-index:2}
+@media (max-width:860px){.sheet{padding:0 6vw}}
+.brackets{position:relative} /* 取景角标：与主工具同一母题 */
+.brackets::before,.brackets::after{
+  content:"";position:absolute;width:18px;height:18px;pointer-events:none;opacity:.9;
+  border:1.6px solid var(--cy);
+}
+.brackets::before{top:-5px;left:-5px;border-right:0;border-bottom:0}
+.brackets::after{bottom:-5px;right:-5px;border-left:0;border-top:0}
+.k{font-family:var(--mono);font-size:10.5px;letter-spacing:.32em;color:var(--ink-3);text-transform:uppercase}
+.rv{opacity:0;transform:translateY(26px)}
+.rv.on{opacity:1;transform:none;transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+
+/* ---------------- 取景十字光标（仅指针设备） ---------------- */
+#cursor{position:fixed;left:0;top:0;z-index:300;pointer-events:none;mix-blend-mode:screen;display:none}
+@media (pointer:fine){
+  body.hascursor,body.hascursor a,body.hascursor button,body.hascursor input{cursor:none}
+  #cursor{display:block}
+}
+#cursor .ring{position:absolute;left:-20px;top:-20px;width:40px;height:40px;border:1.2px solid var(--cy);border-radius:50%;opacity:.9;transition:transform .25s cubic-bezier(.3,1.3,.4,1)}
+#cursor .x,#cursor .y{position:absolute;background:var(--cy);opacity:.9;transition:transform .25s cubic-bezier(.3,1.3,.4,1)}
+#cursor .x{left:-12px;top:-.6px;width:24px;height:1.2px}
+#cursor .y{left:-.6px;top:-12px;width:1.2px;height:24px}
+#cursor.hot .ring{transform:scale(1.7)}
+#cursor.hot .x{transform:scaleX(.34)}
+#cursor.hot .y{transform:scaleY(.34)}
+
+/* ---------------- 侧边 HUD 导航 ---------------- */
+#rail{position:fixed;left:20px;top:50%;transform:translateY(-50%);z-index:90;display:flex;flex-direction:column;gap:26px}
+#rail .line{position:absolute;left:5px;top:-20px;bottom:-20px;width:1px;background:var(--hair)}
+#rail button{position:relative;display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:10.5px;letter-spacing:.26em;color:var(--ink-3);transition:color .3s}
+#rail button i{flex:none;width:7px;height:7px;border:1.2px solid var(--ink-3);transform:rotate(45deg);transition:.3s}
+#rail button span{opacity:0;transform:translateX(-8px);transition:.3s}
+#rail:hover button span,#rail button.on span{opacity:1;transform:none}
+#rail button.on{color:var(--cy)}
+#rail button.on i{border-color:var(--cy);background:var(--cy);box-shadow:0 0 8px var(--cy)}
+@media (max-width:860px){#rail{display:none}}
+
+/* ---------------- 序 · 直入台账（首屏即工具，无仪式） ---------------- */
+.wire path,.wire circle,.wire line,.wire rect,.wire polygon{
+  fill:none;stroke:var(--cy);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:1;stroke-dashoffset:1;
+}
+.wire .dim{stroke:var(--ink-3);stroke-width:1}
+.wire .red{stroke:var(--red)}
+.on .wire path,.on .wire circle,.on .wire line,.on .wire rect,.on .wire polygon{
+  transition:stroke-dashoffset 1.6s cubic-bezier(.5,0,.2,1) .15s;stroke-dashoffset:0;
+}
+
+/* ---------------- 帐 · 解码队列（检索） ---------------- */
+#s2{padding:9vh 0 12vh}
+#s2 .head{position:relative;display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:1.6px solid var(--cy-line);padding-bottom:16px}
+#s2 h2{font-size:clamp(30px,4.6vw,52px);font-weight:800;letter-spacing:.02em}
+#s2 h2 small{font-family:var(--mono);font-size:.38em;color:var(--cy);letter-spacing:.3em;vertical-align:.8em;margin-left:.7em;font-weight:400}
+#meta{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--ink-3)}
+/* 表头下的一条激光发丝线：扫描待命（签名层，静置不闪） */
+#s2 .head::after{
+  content:"";position:absolute;left:0;right:0;bottom:-1.6px;height:2px;
+  background:linear-gradient(90deg,var(--red) 0%,var(--red) 14%,transparent 55%);
+  opacity:.55;box-shadow:0 0 10px rgba(255,77,61,.4);
+}
+.searchrow{display:flex;align-items:flex-end;gap:22px;margin:40px 0 6px;flex-wrap:wrap}
+.searchfield{flex:1 1 340px;position:relative}
+.searchfield label{display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.3em;color:var(--cy);margin-bottom:10px;text-transform:uppercase}
+.searchfield .box{display:flex;align-items:center;gap:12px;border:1px solid var(--hair);background:var(--panel);padding:0 16px;height:52px;transition:border-color .25s,box-shadow .25s}
+.searchfield .box:focus-within{border-color:var(--cy);box-shadow:0 0 0 1px var(--cy-line),0 0 24px rgba(42,245,207,.12)}
+.searchfield svg{flex:none;opacity:.75}
+.searchfield input{flex:1;min-width:0;background:none;border:0;outline:none;font-family:var(--mono);font-size:16.5px;letter-spacing:.04em;color:var(--ink)}
+.searchfield input::placeholder{color:var(--ink-3);opacity:.7}
+.searchfield .kbd{font-family:var(--mono);font-size:10px;color:var(--ink-3);border:1px solid var(--hair);padding:2px 7px;letter-spacing:.1em}
+.filters{display:flex;gap:8px;padding-bottom:2px}
+.filters button{font-family:var(--mono);font-size:11.5px;letter-spacing:.2em;color:var(--ink-3);border:1px solid var(--hair);padding:9px 16px;transition:.25s}
+.filters button.on{color:#021512;background:var(--cy);border-color:var(--cy);box-shadow:0 0 16px rgba(42,245,207,.35)}
+.results{margin-top:30px}
+.group{margin-top:46px}
+.group:first-child{margin-top:10px}
+.group .g-head{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--ink-3);text-transform:uppercase}
+.group .g-head b{color:var(--ink);font-weight:400;font-size:13px;letter-spacing:.12em}
+.group .g-head::after{content:"";flex:1;height:1px;background:var(--hair)}
+.group .g-head .n{color:var(--cy)}
+.row{
+  position:relative;display:grid;width:100%;text-align:left;
+  grid-template-columns:minmax(0,1fr) auto auto;gap:2px 24px;align-items:center;
+  padding:15px 14px;border-bottom:1px solid rgba(140,220,235,.09);
+  transition:background .2s;
+}
+.row:hover{background:rgba(42,245,207,.05)}
+/* 检测框锁定：hover 时四角合拢（取景框母题） */
+.row::before,.row::after{
+  content:"";position:absolute;width:12px;height:12px;opacity:0;transition:opacity .2s,transform .28s cubic-bezier(.3,1.3,.4,1);
+  border:1.6px solid var(--cy);pointer-events:none;
+}
+.row::before{left:4px;top:4px;border-right:0;border-bottom:0;transform:translate(6px,6px)}
+.row::after{right:4px;bottom:4px;border-left:0;border-top:0;transform:translate(-6px,-6px)}
+.row:hover::before,.row:hover::after{opacity:1;transform:none}
+.row .code{font-family:var(--mono);font-size:clamp(16px,2vw,21px);font-weight:700;letter-spacing:.02em;word-break:break-all}
+.row .no{font-family:var(--mono);font-size:12px;color:var(--ink-3);letter-spacing:.1em}
+.row .no em{font-style:normal;color:var(--cy);opacity:.85}
+.row .meta{display:flex;gap:7px;flex-wrap:wrap;grid-column:1/-1;margin-top:3px}
+.row .meta i{font-style:normal;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--ink-2);border:1px solid var(--hair);padding:1.5px 8px;white-space:nowrap}
+.row .st{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.22em;white-space:nowrap;justify-self:end}
+.row .st i{width:7px;height:7px;border-radius:50%;background:var(--cy);box-shadow:0 0 8px var(--cy)}
+.row .st.wait i{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.empty{padding:64px 4px 26px;color:var(--ink-3)}
+.empty .big{font-size:19px;color:var(--ink);margin-bottom:8px;font-weight:600}
+@media (max-width:640px){
+  .row{grid-template-columns:minmax(0,1fr) auto}
+  .row .no{grid-column:1/-1}
+}
+
+/* ---------------- 记 · 工程手记 ---------------- */
+#s3{padding:10vh 0}
+.note-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;background:var(--hair);border:1px solid var(--hair)}
+#s3 article{background:var(--panel);padding:34px 30px 38px}
+#s3 article h3{font-family:var(--mono);font-size:12px;letter-spacing:.34em;color:var(--cy);margin-bottom:16px;text-transform:uppercase}
+#s3 article h3::before{content:"▚ ";letter-spacing:0}
+#s3 article p{font-size:14px;line-height:2;color:var(--ink-2)}
+#s3 article p b{color:var(--ink);font-weight:600}
+#s3 .head{margin-bottom:40px}
+#s3 h2{font-size:clamp(28px,4vw,44px);font-weight:800}
+#s3 h2 small{font-family:var(--mono);font-size:.36em;color:var(--cy);letter-spacing:.3em;vertical-align:.8em;margin-left:.7em;font-weight:400}
+
+/* ---------------- 名 · 署名 ---------------- */
+#s4{padding:10vh 0 6vh}
+.sig-row{display:flex;align-items:flex-end;justify-content:space-between;gap:30px;flex-wrap:wrap}
+.sig svg{width:min(300px,62vw);height:104px;overflow:visible}
+.sig svg path{fill:none;stroke:var(--cy);stroke-width:2.6;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;filter:drop-shadow(0 0 6px rgba(42,245,207,.5))}
+.sig.on svg path{transition:stroke-dashoffset 2.6s cubic-bezier(.4,0,.2,1) .3s;stroke-dashoffset:0}
+.sig figcaption{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;color:var(--ink-3);margin-top:12px}
+.seal{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.26em;color:var(--red);
+  border:1.6px solid var(--red);padding:10px 16px;transform:rotate(-4deg);
+  box-shadow:0 0 14px rgba(255,77,61,.25),inset 0 0 14px rgba(255,77,61,.12);white-space:nowrap;
+}
+.colophon{margin-top:56px;border-top:1px solid var(--hair);padding-top:28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:26px 4vw;font-size:12.5px;line-height:1.95;color:var(--ink-2)}
+.colophon h4{font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--ink-3);margin-bottom:10px;font-weight:400;text-transform:uppercase}
+.swatches{display:flex;gap:10px;margin-top:4px}
+.swatches i{width:36px;height:36px;border:1px solid var(--hair);position:relative}
+.swatches i b{position:absolute;left:0;top:calc(100% + 5px);font-weight:400;font-family:var(--mono);font-size:9px;color:var(--ink-3);letter-spacing:.06em;white-space:nowrap}
+.toollink{display:inline-flex;align-items:center;gap:10px;margin-top:6px;font-family:var(--mono);font-size:13px;letter-spacing:.1em;color:var(--cy);border-bottom:1px solid var(--cy-line);padding-bottom:4px;transition:.25s}
+.toollink:hover{text-shadow:0 0 12px rgba(42,245,207,.6);border-color:var(--cy)}
+footer{padding:26px 0 54px}
+footer .endnote{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ink-3);display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;text-transform:uppercase}
+
+/* ---------------- 详情抽屉（右侧 HUD 面板） ---------------- */
+#drawer{
+  position:fixed;top:0;right:0;bottom:0;z-index:200;width:min(460px,94vw);
+  background:linear-gradient(180deg,var(--panel-2),var(--panel));
+  border-left:1.6px solid var(--cy-line);
+  box-shadow:-30px 0 80px rgba(0,0,0,.55);
+  transform:translateX(103%);transition:transform .42s cubic-bezier(.3,.9,.2,1);
+  overflow-y:auto;padding:56px 30px 40px;
+}
+#drawer.open{transform:none}
+/* 抽屉开启时一道青色扫描自上而下确认解码 */
+#drawer .dsweep{position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,transparent,var(--cy),transparent);box-shadow:0 0 12px var(--cy);opacity:0}
+#drawer.open .dsweep{animation:dsw .9s cubic-bezier(.4,0,.3,1) .12s}
+@keyframes dsw{0%{opacity:1;top:0}90%{opacity:1}100%{top:100%;opacity:0}}
+#drawer .close{position:absolute;right:14px;top:12px;width:40px;height:40px;display:grid;place-items:center;color:var(--ink-3);transition:color .2s,transform .3s}
+#drawer .close:hover{color:var(--cy);transform:rotate(90deg)}
+#drawer .d-cat{font-family:var(--mono);font-size:10px;letter-spacing:.32em;color:var(--ink-3);text-transform:uppercase}
+#drawer .d-code{font-family:var(--mono);font-weight:700;font-size:clamp(25px,6vw,33px);word-break:break-all;margin:12px 0 2px;text-shadow:0 0 24px rgba(42,245,207,.25)}
+#drawer .d-name{font-size:14px;color:var(--ink-2);letter-spacing:.04em}
+#drawer .d-no{display:flex;align-items:center;gap:14px;margin:24px 0 4px;padding:14px 2px;border-top:1.6px solid var(--cy-line);border-bottom:1px solid var(--hair);flex-wrap:wrap}
+#drawer .d-no small{font-family:var(--mono);font-size:10px;letter-spacing:.3em;color:var(--ink-3);white-space:nowrap}
+#drawer .d-no b{font-family:var(--mono);font-size:21px;letter-spacing:.12em;color:var(--cy);text-shadow:0 0 14px rgba(42,245,207,.4);white-space:nowrap}
+#drawer .copybtn{
+  margin-left:auto;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;
+  font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:#021512;
+  background:var(--cy);padding:9px 15px;box-shadow:0 0 18px rgba(42,245,207,.4);transition:transform .2s,box-shadow .2s;
+}
+#drawer .copybtn:active{transform:scale(.94);box-shadow:0 0 8px rgba(42,245,207,.3)}
+#drawer .kv{display:flex;align-items:baseline;gap:10px;padding:10px 2px;font-size:13px}
+#drawer .kv + .kv{border-top:1px dashed rgba(140,220,235,.12)}
+#drawer .kv .k{flex:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.26em;color:var(--ink-3)}
+#drawer .kv .lead{flex:1;border-bottom:1px dotted rgba(140,220,235,.18);transform:translateY(-4px)}
+#drawer .kv .v{font-family:var(--mono);font-size:13.5px;color:var(--ink)}
+#drawer .d-st{margin-top:24px;display:inline-flex}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .rv{opacity:1;transform:none}
+  .on .wire path,.on .wire circle,.on .wire line,.on .wire rect,.on .wire polygon{transition:none;stroke-dashoffset:0}
+  .laser,#drawer .dsweep{display:none}
+  #drawer{transition:none}
+  #cursor{display:none!important}
+  #boot{display:none}
+  *{animation:none!important}
+}
+</style>
+</head>
+<body>
+
+<canvas id="stars" aria-hidden="true"></canvas>
+<div id="cursor" aria-hidden="true"><span class="ring"></span><span class="x"></span><span class="y"></span></div>
+
+<!-- 侧边导航：直入功能，无仪式 -->
+<nav id="rail" aria-label="章节">
+  <span class="line"></span>
+  <button data-goto="s2" class="on"><i></i><span>00 DECODE 台账</span></button>
+  <button data-goto="s3"><i></i><span>01 NOTES 手记</span></button>
+  <button data-goto="s4"><i></i><span>02 SIGN 署名</span></button>
+</nav>
+
+<main class="sheet">
+
+  <!-- ══════ 00 台账（首屏即工具） ══════ -->
+  <section id="s2">
+    <div class="head rv">
+      <h2>解码队列<small>DECODE QUEUE</small></h2>
+      <span id="meta">样册在线 · 24 型</span>
+    </div>
+    <div class="searchrow rv">
+      <div class="searchfield">
+        <label for="q">目标输入 / TARGET INPUT</label>
+        <div class="box">
+          <svg width="17" height="17" viewBox="0 0 17 17" aria-hidden="true"><circle cx="7" cy="7" r="5.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11.5,11.5 L16,16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <input id="q" type="search" placeholder="VS2000-52C / 95010098 / 红光 / VN4000…" autocomplete="off">
+          <span class="kbd">/</span>
+        </div>
+      </div>
+      <div class="filters" role="tablist" aria-label="状态筛选">
+        <button class="on" data-st="">ALL</button>
+        <button data-st="可售">可售</button>
+        <button data-st="待上市">待上市</button>
+      </div>
+    </div>
+    <div class="results" id="results" aria-live="polite"></div>
+  </section>
+
+  <!-- ══════ 03 手记 ══════ -->
+  <section id="s3">
+    <div class="head rv">
+      <h2>工程手记<small>ENGINEER'S NOTES</small></h2>
+    </div>
+    <div class="note-grid rv">
+      <article>
+        <h3>黑 / DARK</h3>
+        <p>页面浸在近黑里，因为<b>工业相机在暗场中工作</b>，补光只为目标服务。
+        屏幕的底噪是 3px 扫描线——老式监视器的质感，机器没关过机。</p>
+      </article>
+      <article>
+        <h3>光 / LIGHT</h3>
+        <p>发光不是装饰，是状态语义：<b>激光红</b>只属于扫描线，
+        <b>荧光青</b>只属于解码成功，<b>琥珀</b>只属于待上市。
+        一页三种光，各有岗位，不越界。</p>
+      </article>
+      <article>
+        <h3>线 / GRID</h3>
+        <p>界面上每一根线都来自机器的取景框：角标、刻度、十字、检测框。
+        你在这页看到的 HUD，和<b>设备屏幕上的 HUD 是同一套语法</b>——
+        销售给客户演示网页，就像在演示机器。</p>
+      </article>
+      <article>
+        <h3>动 / MOTION</h3>
+        <p>动效只有三种：<b>扫描、锁定、输出</b>。
+        开机自检只跑一次，一秒半，是仪式不是广告；
+        之后所有动画都是你操作的回声。</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════ 04 署名 ══════ -->
+  <section id="s4">
+    <div class="sig-row">
+      <figure class="sig rv" id="sig">
+        <svg viewBox="0 0 300 100" aria-label="设计师手写签名">
+          <path pathLength="1" d="M18,72 C30,30 44,22 50,40 C55,55 47,72 40,74 C52,70 62,52 70,50 C77,48 72,70 80,66 C88,62 92,50 100,52 C107,54 102,66 110,63 C120,59 128,44 138,48 M150,60 C158,36 170,28 176,40 C181,50 176,62 170,64 C182,62 190,50 198,50 C205,50 202,62 210,60 C222,57 232,44 244,50 C252,54 246,66 258,62 C270,58 280,52 290,54"/>
+        </svg>
+        <figcaption>adam · 641818675 — PARTFINDER VISION WORKS，2026.08</figcaption>
+      </figure>
+      <span class="seal">DECODED · 解码确认</span>
+    </div>
+    <div class="colophon rv">
+      <div>
+        <h4>色板 / PALETTE</h4>
+        <div class="swatches">
+          <i style="background:#04070a"><b>暗场</b></i>
+          <i style="background:#2af5cf"><b>解码青</b></i>
+          <i style="background:#ff4d3d"><b>激光红</b></i>
+          <i style="background:#ffb02e"><b>琥珀</b></i>
+          <i style="background:#e6f4f0"><b>金属字</b></i>
+        </div>
+      </div>
+      <div>
+        <h4>字型 / TYPE</h4>
+        等宽字承担全部数据与身份（料号是拿来抄写的）；<br>
+        黑体大字负责标题的推力。网格 3px 扫描线 × 荧光网格底阵。
+      </div>
+      <div>
+        <h4>完整设备 / FULL UNIT</h4>
+        本页样册 24 型，料号真实可抄。<br>
+        <a class="toollink" href="index.html">查全部 1213 型 · 打开完整离线仪器 →</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="endnote">
+      <span>《VISION.OS》— 页面即读码器：扫描、锁定、解码、输出。所有的光都对应一个真实动作。</span>
+      <span>LEDGER v9.7.0 · EXPORTED 2026-08-30 · HAND-CODED, NO FRAMEWORK</span>
+    </div>
+  </footer>
+</main>
+
+<!-- 详情抽屉 -->
+<aside id="drawer" aria-label="型号详情">
+  <span class="dsweep" aria-hidden="true"></span>
+  <button class="close" id="dclose" aria-label="关闭详情">
+    <svg width="18" height="18" viewBox="0 0 18 18"><path d="M2,2 L16,16 M16,2 L2,16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+  <div id="dbody"></div>
+</aside>
+
+<script>
+/* ══════════ 数据：24 型真机样册（摘自台账 v9.7.0，料号真实）
+   字段：型号,料号,名称,系列,类别,状态,像素MP,光源,偏振,焦距,调焦,分辨率 ══════════ */
+var DATA=[
+["VS2000-523-030","95010098","VS2000-523-030","VS2000","固定式读码器","可售","5","白","无","","液态",""],
+["VS2000-52C","95010119","VS2000-52C","VS2000","固定式读码器","可售","5","","","","",""],
+["VS1000P-111-022","95010009","VS1000P-111-022","VS1000P","固定式读码器","可售","1","红","半","8","","1280*800"],
+["VS1000P-112-022","95010010","VS1000P-112-022","VS1000P","固定式读码器","可售","1","红","半","12","","1280*800"],
+["VS600-SR-W","95010259","VS600-SR-W","VS600","固定式读码器","可售","1","白","无","","","1280*800"],
+["VS600-SR-WP","95010260","VS600-SR-WP","VS600","固定式读码器","可售","1","白","全","","","1280*800"],
+["VS500M-14B-SR-UR-N","95011522","VS500M-14B-SR-UR-N","VS500MAX","中性读码器","可售","","","","","",""],
+["VS500M-14B-NR-UR-N","95011523","VS500M-14B-NR-UR-N","VS500MAX","中性读码器","可售","","","","","",""],
+["VSE100-1405-SR","95080001","VSE100-1405-SR","VSE100","固定式读码器","可售","1.4","","","5","",""],
+["VSE100-1405-NR","95080002","VSE100-1405-NR","VSE100","固定式读码器","可售","1.4","","","5","",""],
+["VHS8000-HD-P","95010721","VHS8000-HD-P","VHS8000","固定式读码器","可售","","","","","",""],
+["VHS8000-HD-U","95010722","VHS8000-HD-U","VHS8000","固定式读码器","可售","","","","","",""],
+["VN4000-101-W21","95020097","VN4000-101-W21","VN4000","智能传感器","可售","1","红","无","8","","1280*800"],
+["VN4000-102-W21","95020098","VN4000-102-W21","VN4000","智能传感器","可售","1","红","无","12","","1280*800"],
+["VN6000-501-020","95020358","VN6000-501-020","VN6000","智能传感器","待上市","5","白","无","8","","2448*2048"],
+["VN6000-502-020","95020359","VN6000-502-020","VN6000","智能传感器","待上市","5","白","无","12","","2448*2048"],
+["VA6500-501-020","95020637","VA6500-501-020","VA6500","智能传感器","可售","5","白","无","8","","2448*2048"],
+["VA6500-502-020","95020638","VA6500-502-020","VA6500","智能传感器","可售","5","白","无","12","","2448*2048"],
+["WIT40-201-021","95021151","WIT40-201-021","WIT40","智能传感器","可售","2.3","红","无","8","","1920*1200"],
+["WIT40-202-021","95021152","WIT40-202-021","WIT40","智能传感器","可售","2.3","红","无","12","","1920*1200"],
+["WIT50-201-021","95021181","WIT50-201-021","WIT50","智能传感器","可售","2.3","红","无","8","","1920*1200"],
+["WIT50-202-021","95021182","WIT50-202-021","WIT50","智能传感器","可售","2.3","红","无","12","","1920*1200"],
+["VS2000P-202HC","95011025","VS2000P-202HC","VS2000P","固定式读码器","可售","20","","","","","5472*3648"],
+["VS2000P-202NHC","95011034","VS2000P-202NHC","VS2000P","中性读码器","可售","20","","","","","5472*3648"]
+];
+
+/* ══════════ 检索仪器 ══════════ */
+var q=document.getElementById('q'),res=document.getElementById('results'),
+    meta=document.getElementById('meta'),stFilter='',drawer=document.getElementById('drawer'),
+    dbody=document.getElementById('dbody');
+
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function specs(r){var a=[];if(r[6])a.push(r[6]+'MP');if(r[7])a.push(r[7]+'光');if(r[8])a.push(r[8]+'偏振');
+  if(r[9])a.push(r[9]+'mm');if(r[10])a.push(r[10]+'调焦');if(r[11])a.push(r[11]);return a}
+/* 索引 = 原始字段 + 界面显示词（红光/半偏振…），报得出的一定搜得到 */
+var IDX=DATA.map(function(r,i){return (r.join(' ')+' '+specs(r).join(' ')).toLowerCase()});
+function match(i,kw){
+  var r=DATA[i];
+  if(stFilter&&r[5]!==stFilter)return false;
+  if(!kw)return true;
+  return IDX[i].indexOf(kw)>=0;
+}
+function render(){
+  var t0=performance.now(),kw=q.value.trim().toLowerCase();
+  var rows=[];DATA.forEach(function(r,i){if(match(i,kw))rows.push(r)});
+  var ms=(performance.now()-t0);
+  meta.textContent=kw?('命中 '+rows.length+' 型 · 检索 '+ms.toFixed(1)+'ms'):('样册在线 · '+rows.length+' 型');
+  if(!rows.length){
+    res.innerHTML='<div class="empty"><div class="big">未捕获目标。</div>'+
+      '换一种输入：报系列（VS2000）、报料号（95010098）、或报光种（红光）。</div>';
+    return;
+  }
+  var groups={},order=[];
+  rows.forEach(function(r){if(!groups[r[3]]){groups[r[3]]=[];order.push(r[3])}groups[r[3]].push(r)});
+  var html='';
+  order.forEach(function(g){
+    html+='<div class="group"><div class="g-head"><b>SERIES / '+esc(g)+'</b><span class="n">'+groups[g].length+' UNITS</span></div>';
+    groups[g].forEach(function(r){
+      var tags=specs(r).map(function(s){return '<i>'+esc(s)+'</i>'}).join('');
+      html+='<button class="row" data-no="'+r[1]+'" data-mag>'+
+        '<span class="code">'+esc(r[0])+'</span>'+
+        '<span class="st '+(r[5]==='可售'?'':'wait')+'"><i></i>'+esc(r[5])+'</span>'+
+        '<span class="no">料号 <em>'+esc(r[1])+'</em></span>'+
+        '<span class="meta">'+tags+'<i>'+esc(r[4])+'</i></span>'+
+        '</button>';
+    });
+    html+='</div>';
+  });
+  res.innerHTML=html;
+}
+function openDrawer(no){
+  var r=DATA.filter(function(x){return x[1]===no})[0];if(!r)return;
+  var sp=[['类别',r[4]],['系列',r[3]],['像素',r[6]?r[6]+' MP':''],['光源',r[7]?r[7]+'光':''],
+          ['偏振',r[8]?r[8]+'偏振':''],['焦距',r[9]?r[9]+' mm':''],['调焦',r[10]?r[10]+'调焦':''],['分辨率',r[11]]]
+          .filter(function(x){return x[1]});
+  dbody.innerHTML=
+    '<span class="d-cat">'+esc(r[4])+' / '+esc(r[3])+'</span>'+
+    '<div class="d-code">'+esc(r[0])+'</div>'+
+    '<div class="d-name">'+esc(r[2])+'</div>'+
+    '<div class="d-no"><small>料号 PART NO.</small><b>'+esc(r[1])+'</b>'+
+      '<button class="copybtn" data-copy="'+esc(r[1])+'" data-mag>COPY 抄写'+
+      '<svg width="13" height="13" viewBox="0 0 14 14"><rect x="4" y="1" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10,13 H2 V4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>'+
+      '</button></div>'+
+    sp.map(function(x){return '<div class="kv"><span class="k">'+x[0]+'</span><span class="lead"></span><span class="v">'+esc(x[1])+'</span></div>'}).join('')+
+    '<span class="st '+(r[5]==='可售'?'':'wait')+' d-st"><i></i>'+esc(r[5])+'</span>';
+  drawer.classList.add('open');
+  document.getElementById('dclose').focus();
+}
+function closeDrawer(){drawer.classList.remove('open')}
+function copy(t,btn){
+  function done(){
+    btn.textContent='COPIED 已抄 ✓';
+    setTimeout(function(){btn.innerHTML=btn.dataset.orig},1400);
+  }
+  function fallback(){var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy')}catch(e){}document.body.removeChild(ta);done()}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,fallback)}
+  else fallback();
+}
+q.addEventListener('input',render);
+document.querySelectorAll('.filters button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.filters button').forEach(function(x){x.classList.remove('on')});
+    b.classList.add('on');stFilter=b.dataset.st;render();
+  });
+});
+res.addEventListener('click',function(e){var row=e.target.closest('.row');if(row)openDrawer(row.dataset.no)});
+drawer.addEventListener('click',function(e){
+  var c=e.target.closest('.copybtn');
+  if(c){if(!c.dataset.orig)c.dataset.orig=c.innerHTML;copy(c.dataset.copy,c);return}
+  if(e.target.closest('#dclose'))closeDrawer();
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='/'&&document.activeElement!==q){e.preventDefault();q.focus()}
+  if(e.key==='Escape')closeDrawer();
+});
+render();
+
+/* ══════════ 滚动叙事 ══════════ */
+var io=new IntersectionObserver(function(es){
+  es.forEach(function(x){if(x.isIntersecting){x.target.classList.add('on');io.unobserve(x.target)}});
+},{threshold:.18});
+document.querySelectorAll('.rv,.sig,figure,.note-grid,.stats').forEach(function(el){io.observe(el)});
+
+/* ══════════ 侧边导航 ══════════ */
+var secs=['s2','s3','s4'];
+var railBtns=document.querySelectorAll('#rail button');
+railBtns.forEach(function(b){b.addEventListener('click',function(){
+  document.getElementById(b.dataset.goto).scrollIntoView({behavior:'smooth'})})});
+var secIO=new IntersectionObserver(function(es){
+  es.forEach(function(x){if(x.isIntersecting){
+    railBtns.forEach(function(b){b.classList.toggle('on',b.dataset.goto===x.target.id)})
+  }});
+},{rootMargin:'-45% 0px -45% 0px'});
+secs.forEach(function(id){secIO.observe(document.getElementById(id))});
+
+/* ══════════ 背景粒子暗场（廉价 canvas：40 点缓慢漂移） ══════════ */
+(function(){
+  var reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var cv=document.getElementById('stars'),ctx=cv.getContext('2d');
+  var W,H,pts=[];
+  function size(){W=cv.width=innerWidth;H=cv.height=innerHeight;
+    pts=[];for(var i=0;i<40;i++)pts.push({x:Math.random()*W,y:Math.random()*H,
+      r:Math.random()*1.4+.4,v:Math.random()*.16+.05,o:Math.random()*.5+.15})}
+  size();addEventListener('resize',size);
+  (function draw(){
+    ctx.clearRect(0,0,W,H);
+    for(var i=0;i<pts.length;i++){var p=pts[i];
+      ctx.globalAlpha=p.o;ctx.fillStyle='#2af5cf';
+      ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fill();
+      p.y-=p.v;if(p.y<-4){p.y=H+4;p.x=Math.random()*W}
+    }
+    if(!reduce)requestAnimationFrame(draw);
+  })();
+})();
+
+/* ══════════ 取景十字光标 ══════════ */
+(function(){
+  if(!window.matchMedia('(pointer:fine)').matches)return;
+  var cur=document.getElementById('cursor'),x=innerWidth/2,y=innerHeight/2,tx=x,ty=y;
+  document.body.classList.add('hascursor');
+  addEventListener('mousemove',function(e){tx=e.clientX;ty=e.clientY});
+  (function loop(){x+=(tx-x)*.3;y+=(ty-y)*.3;
+    cur.style.transform='translate('+x+'px,'+y+'px)';requestAnimationFrame(loop)})();
+  document.addEventListener('mouseover',function(e){
+    cur.classList.toggle('hot',!!(e.target.closest&&e.target.closest('a,button,input,[data-mag]')))
+  });
+})();
+</script>
+</body>
+</html>

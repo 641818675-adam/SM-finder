@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- 缩放不再禁用（WCAG 1.4.4）：输入框已统一 16px，iOS 聚焦自动放大的触发条件本就不存在，
+     Android WebView 的 300ms 点击延迟也早已随 width=device-width 消除。 -->
+<meta name="theme-color" content="#0b0d12">
+<meta name="color-scheme" content="dark">
+<title>PartFinder</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PartFinder">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+
+<!-- iOS 主屏 Web App（加到主屏后脱离 Safari，无地址栏、独立存储、无 7 天签名到期）。
+     状态栏样式刻意用 default 而非 black-translucent：后者强制白色文字，
+     浅色主题下不可读；default 会让系统按上方 theme-color 自动决定前景色。
+     telephone=no：iOS 会把客户电话自动变成蓝色下划线链接，与 Android 端观感不一致。 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PartFinder">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<!-- 样式分层加载：令牌 → 基础 → 组件 → 视图 -->
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/views.css">
+<script>
+/* 运行期错误可视化：真机排查时避免白屏，直接暴露原因与位置。 */
+(function () {
+  function show(title, detail) {
+    var box = document.getElementById('splash');
+    if (!document.body) return;
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'splash';
+      box.className = 'splash';
+      document.body.appendChild(box);
+    }
+    box.style.display = 'flex';
+    box.innerHTML =
+      '<div class="n" style="color:var(--danger)">' + title + '</div>' +
+      '<div class="s" style="max-width:80vw;text-align:center;font-family:ui-monospace,monospace;' +
+      'white-space:pre-wrap;line-height:1.5">' + detail + '</div>';
+  }
+  window.addEventListener('error', function (e) {
+    show('运行出错', (e.message || '未知错误') + '\n' +
+      (e.filename || '').split('/').pop() + ':' + (e.lineno || 0));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    show('数据加载失败', String((e.reason && e.reason.message) || e.reason || '未知原因'));
+  });
+})();
+</script>
+</head>
+<body>
+
+<!-- 启动屏：数据索引完成前占位 -->
+<div class="splash" id="splash">
+  <div class="logo">
+    <svg width="40" height="40" viewBox="0 0 108 108" fill="none"
+         stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M32,48 L32,38 Q32,32 38,32 L48,32"/>
+      <path d="M60,32 L70,32 Q76,32 76,38 L76,48"/>
+      <path d="M32,60 L32,70 Q32,76 38,76 L48,76"/>
+      <path d="M60,76 L70,76 Q76,76 76,70 L76,60"/>
+      <path d="M37,54 L71,54"/>
+      <path d="M42,42 L42,66"/><path d="M50,42 L50,66"/>
+      <path d="M58,42 L58,66"/><path d="M66,42 L66,66"/>
+    </svg>
+  </div>
+  <div class="n">PartFinder</div>
+  <div class="s">正在载入离线物料库…</div>
+  <div class="spinner"></div>
+</div>
+
+<div id="app">
+  <div class="workspace">
+    <!-- 左栏：顶栏（标题/搜索/筛选）+ 列表；宽屏下右栏详情通顶展示 -->
+    <div class="list-col">
+      <header class="topbar" id="topbar"></header>
+      <section class="pane pane-list" id="list-body"></section>
+    </div>
+    <section class="pane pane-detail empty" id="detail-pane"></section>
+  </div>
+
+  <nav class="nav" id="nav"></nav>
+</div>
+
+<!-- 折叠态：详情以全屏层呈现 -->
+<div class="sheet" id="sheet" style="display:none"></div>
+
+<!-- 模态层：确认框 / 体验反馈 / 客户导入 -->
+<div class="modal-host" id="modal" style="display:none"></div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 加载顺序即依赖顺序：核心 → 领域 → 元件 → 视图 → 编排。
+     全部为经典脚本（不用 ES module）：file:// 下 module 会被 CORS 拦截。 -->
+
+<!-- 1. 核心层：纯工具 / 图标 / 状态与查询索引 -->
+<script src="js/core/util.js"></script>
+<script src="js/core/icons.js"></script>
+<script src="js/core/store.js"></script>
+
+<!-- 2. 领域层：搜索引擎（移植自桌面版 V9.6）/ 持久化 / 套包规则 / 客户 -->
+<script src="js/search.js"></script>
+<script src="js/data.js"></script>
+<script src="js/contract.js"></script>
+<script src="js/customer.js"></script>
+
+<!-- 3. UI 元件层：渲染原语 / 模态 -->
+<script src="js/ui/primitives.js"></script>
+<script src="js/ui/modal.js"></script>
+
+<!-- 4. 视图层：外框 + 五个页签 + 详情 -->
+<script src="js/views/chrome.js"></script>
+<script src="js/views/results.js"></script>
+<script src="js/views/config.js"></script>
+<script src="js/views/rival.js"></script>
+<script src="js/views/customers.js"></script>
+<script src="js/views/saved.js"></script>
+<script src="js/views/detail.js"></script>
+
+<!-- 5. 编排层：事件路由、启动、全局出口 -->
+<script src="js/app.js"></script>
+
+<script>
+/* Service Worker 注册 —— 只为 iOS/PWA 路径服务。
+   Android 壳运行在 file:// 上，'serviceWorker' in navigator 为 false，整段直接跳过；
+   放在 load 之后注册，避免与首屏数据索引抢带宽。
+   注册失败不做任何提示：这是可选增强，失败也只是「不能离线」，功能不受影响。 */
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js')['catch'](function () {});
+    // 主屏 Web App 的存储在系统压力下可能被回收，申请持久化配额
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist()['catch'](function () {});
+    }
+  });
+})();
+</script>
+<script>
+/* PWA：仅 HTTPS（安全上下文）注册 Service Worker；APK/文件协议下静默跳过 */
+if ('serviceWorker' in navigator && /^https:$/.test(location.protocol)) {
+  addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
